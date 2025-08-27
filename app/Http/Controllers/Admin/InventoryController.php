@@ -8,6 +8,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Batch;
 use App\Models\Category;
@@ -73,6 +74,82 @@ class InventoryController extends Controller
         ]);
     }
     public function update(Request $request, $id) {}
+
+    public function adjustInventory(Request $request, $batch_item_id)
+    {
+        // dd($request->all(), $batch_item_id);
+        // Validate batch_item_id exists
+        if (!BatchItem::where('id', $batch_item_id)->exists()) {
+            return redirect()->back()->with('error', 'Lô hàng không tồn tại.');
+        }
+
+        $request->validate([
+            'new_quantity' => 'required|integer|min:0',
+            'reason' => 'nullable|string|max:255'
+        ]);
+
+        try {
+            return DB::transaction(function () use ($request, $batch_item_id) {
+                $batchItem = BatchItem::with('batch')->findOrFail($batch_item_id);
+                $product = Product::findOrFail($batchItem->product_id);
+
+                $min_stock = $product->min_stock_level;
+                $max_stock = $product->max_stock_level;
+                $oldQuantity = $batchItem->current_quantity;
+                $newQuantity = $request->new_quantity;
+                $quantityChange = '';
+
+                if ($newQuantity >= $max_stock) {
+                    return redirect()->back()->with('error', 'Số lượng thay đổi vượt quá định mức cho phép!');
+                }
+                if ($newQuantity <= $min_stock) {
+                    return redirect()->back()->with('error', 'Số lượng thay đổi không đạt số lượng tối thiểu!');
+                }
+
+                if ($newQuantity > $oldQuantity && $newQuantity <= $max_stock) {
+                    $batchItem->current_quantity = $newQuantity;
+                    $quantityChange = $newQuantity - $oldQuantity;
+                    $batchItem->save();
+
+                    InventoryTransaction::create([
+                        'transaction_type_id' => 3,
+                        'product_id' => $product->id,
+                        'quantity_change' => $quantityChange,
+                        'stock_after' => $newQuantity,
+                        'transaction_date' => now(),
+                        'related_batch_id' => $batchItem->batch_id,
+                        'user_id' => Auth::id(),
+                        'note' => $request->reason . " (Lô: " . $batchItem->batch->batch_number . ")",
+                    ]);
+                }
+
+                if ($newQuantity < $oldQuantity && $newQuantity >= $min_stock) {
+                    $batchItem->current_quantity = $newQuantity;
+                    $quantityChange = $oldQuantity - $newQuantity;
+                    $batchItem->save();
+
+                    InventoryTransaction::create([
+                        'transaction_type_id' => 3,
+                        'product_id' => $product->id,
+                        'quantity_change' => $quantityChange,
+                        'stock_after' => $newQuantity,
+                        'transaction_date' => now(),
+                        'related_batch_id' => $batchItem->batch_id,
+                        'user_id' => Auth::id(),
+                        'note' => $request->reason . " (Lô: " . $batchItem->batch->batch_number . ")",
+                    ]);
+                }
+
+
+                $this->syncInventory();
+
+                return redirect()->back()->with('success', 'Điều chỉnh tồn kho lô hàng thành công!');
+            });
+        } catch (\Exception $e) {
+            Log::error('Error adjusting inventory: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Có lỗi khi điều chỉnh tồn kho lô hàng.');
+        }
+    }
 
     public function syncInventory()
     {

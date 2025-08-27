@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import FlashMessage from '@/components/FlashMessage.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, usePage } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -9,6 +11,12 @@ const breadcrumbs: BreadcrumbItem[] = [
         href: '/admin/inventory',
     },
 ];
+
+// Reactive state cho chức năng điều chỉnh tồn kho
+const editingBatchItems = ref<Record<number, boolean>>({});
+const newQuantities = ref<Record<number, number>>({});
+const adjustReasons = ref<Record<number, string>>({});
+const isLoading = ref(false);
 
 // Khai báo kiểu dữ liệu cho product
 interface Product {
@@ -126,11 +134,63 @@ function getBatchNumber(batchId: number): string {
 function goBack() {
     router.visit('/admin/inventory');
 }
+
+// Các function cho chức năng điều chỉnh tồn kho batch items
+function startEditingBatchItem(batchItemId: number, currentQuantity: number) {
+    editingBatchItems.value[batchItemId] = true;
+    newQuantities.value[batchItemId] = currentQuantity;
+    adjustReasons.value[batchItemId] = '';
+}
+
+function cancelEditingBatchItem(batchItemId: number) {
+    delete editingBatchItems.value[batchItemId];
+    delete newQuantities.value[batchItemId];
+    delete adjustReasons.value[batchItemId];
+}
+
+function updateQuantity(batchItemId: number, value: string) {
+    newQuantities.value[batchItemId] = parseInt(value) || 0;
+}
+
+function updateReason(batchItemId: number, value: string) {
+    adjustReasons.value[batchItemId] = value;
+}
+
+async function saveBatchItemAdjustment(batchItemId: number, oldQuantity: number) {
+    const newQuantity = newQuantities.value[batchItemId];
+
+    if (newQuantity === oldQuantity) {
+        cancelEditingBatchItem(batchItemId);
+        return;
+    }
+
+    isLoading.value = true;
+
+    router.post(
+        `/admin/inventory/adjust_inventory/${batchItemId}`,
+        {
+            new_quantity: newQuantity,
+            reason: adjustReasons.value[batchItemId] || 'Điều chỉnh tồn kho lô hàng thủ công',
+        },
+        {
+            onSuccess: () => {
+                cancelEditingBatchItem(batchItemId);
+            },
+            onError: (errors) => {
+                console.error('Validation errors:', errors);
+            },
+            onFinish: () => {
+                isLoading.value = false;
+            },
+        },
+    );
+}
 </script>
 
 <template>
     <Head title="Chi tiết tồn kho" />
     <AppLayout :breadcrumbs="breadcrumbs">
+        <FlashMessage />
         <div class="no-print min-h-screen bg-gray-50 p-6">
             <div class="mx-auto max-w-7xl space-y-4">
                 <div class="flex items-center justify-between">
@@ -249,13 +309,14 @@ function goBack() {
                             </div>
                             <div class="space-y-4 p-6">
                                 <div>
-                                    <label class="mb-1 block text-sm font-medium text-gray-700">Tồn kho</label>
+                                    <label class="mb-1 block text-sm font-medium text-gray-700">Tổng tồn kho</label>
                                     <input
                                         type="number"
                                         class="block w-full rounded-md border-gray-300 px-2 py-2 shadow-sm"
                                         :value="props.product.stock_quantity"
                                         disabled
                                     />
+                                    <p class="mt-1 text-sm text-gray-500">Để chỉnh sửa tồn kho, vui lòng điều chỉnh từng lô hàng bên dưới</p>
                                 </div>
                                 <div>
                                     <label class="mb-1 block text-sm font-medium text-gray-700">Có thể bán</label>
@@ -361,7 +422,49 @@ function goBack() {
                                                         <td class="px-6 py-4 text-sm whitespace-nowrap text-gray-500">
                                                             {{ item.expiry_date ? new Date(item.expiry_date).toLocaleDateString('vi-VN') : 'N/A' }}
                                                         </td>
-                                                        <td class="px-6 py-4 text-sm whitespace-nowrap text-gray-500">{{ item.current_quantity }}</td>
+                                                        <td class="px-6 py-4 text-sm whitespace-nowrap text-gray-500">
+                                                            <div v-if="!editingBatchItems[item.id]" class="flex items-center gap-2">
+                                                                <span>{{ item.current_quantity }}</span>
+                                                                <button
+                                                                    @click="startEditingBatchItem(item.id, item.current_quantity)"
+                                                                    class="rounded bg-blue-500 px-2 py-1 text-xs text-white hover:bg-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                                                                >
+                                                                    Sửa
+                                                                </button>
+                                                            </div>
+                                                            <div v-else class="space-y-2">
+                                                                <input
+                                                                    :value="newQuantities[item.id]"
+                                                                    @input="updateQuantity(item.id, ($event.target as HTMLInputElement).value)"
+                                                                    type="number"
+                                                                    min="0"
+                                                                    class="w-20 rounded border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:ring-blue-500"
+                                                                />
+                                                                <input
+                                                                    :value="adjustReasons[item.id]"
+                                                                    @input="updateReason(item.id, ($event.target as HTMLInputElement).value)"
+                                                                    type="text"
+                                                                    placeholder="Lý do"
+                                                                    class="w-full rounded border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:ring-blue-500"
+                                                                />
+                                                                <div class="flex gap-1">
+                                                                    <button
+                                                                        @click="saveBatchItemAdjustment(item.id, item.current_quantity)"
+                                                                        :disabled="isLoading"
+                                                                        class="rounded bg-green-500 px-2 py-1 text-xs text-white hover:bg-green-600 focus:ring-1 focus:ring-green-500 focus:outline-none disabled:bg-gray-400"
+                                                                    >
+                                                                        {{ isLoading ? 'Lưu...' : 'Lưu' }}
+                                                                    </button>
+                                                                    <button
+                                                                        @click="cancelEditingBatchItem(item.id)"
+                                                                        :disabled="isLoading"
+                                                                        class="rounded bg-gray-500 px-2 py-1 text-xs text-white hover:bg-gray-600 focus:ring-1 focus:ring-gray-500 focus:outline-none disabled:bg-gray-400"
+                                                                    >
+                                                                        Hủy
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </td>
                                                     </tr>
                                                 </template>
                                             </tbody>
