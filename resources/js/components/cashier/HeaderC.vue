@@ -2,7 +2,6 @@
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import { router as inertiaRouter, Link, usePage } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-
 import { Clock, Lock, LogOut, Monitor, Moon, RefreshCw, Sun, User, Wifi, WifiOff } from 'lucide-vue-next';
 
 const isDropdownOpen = ref(false);
@@ -62,11 +61,13 @@ const refreshOrder = () => {
 const lockScreen = () => (isLocked.value = true);
 const unlockScreen = () => (isLocked.value = false);
 
-const handleLogout = () => {
+const handleLogout = async () => {
     isDropdownOpen.value = false;
+    const confirmCloseShift = window.confirm('Bạn có muốn đóng ca làm việc trước khi đăng xuất không?');
+    
     inertiaRouter.post(
         '/cashier/logout',
-        {},
+        { closeShift: confirmCloseShift },
         {
             onFinish: () => {
                 localStorage.removeItem('userToken');
@@ -143,23 +144,16 @@ onUnmounted(() => {
     });
     clearTimeout(idleTimeout);
 });
-// window.addEventListener('keydown', (e) => {
-//   if (e.key === 'Insert') {
-//     isOnline.value = !isOnline.value;
-//     showOfflineMessage.value = !isOnline.value;
-//   }
-// });
 </script>
+
 <template>
     <header class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-        <!-- Bên trái -->
         <div class="flex items-center space-x-4">
             <Link :href="route('cashier.dashboard')" title="Trang chính">
                 <div class="text-xl font-semibold tracking-wide text-blue-800">
                     <AppLogoIcon imageUrl="/storage/piclumen-1747750187180.png" className="w-12 h-12" />
                 </div>
             </Link>
-
             <div class="flex items-center space-x-2 text-xs">
                 <div class="flex items-center gap-1 rounded bg-gray-100 px-2 py-1" title="Tên thu ngân">
                     <User class="h-4 w-4" /> {{ cashierName }}
@@ -178,27 +172,20 @@ onUnmounted(() => {
                 </div>
             </div>
         </div>
-
-        <!-- Bên phải -->
         <div class="flex items-center space-x-4">
             <span class="rounded bg-gray-200 px-3 py-1 font-mono tracking-wider">{{ currentTime }}</span>
-
             <button @click="refreshOrder" class="flex items-center gap-1 text-sm text-blue-600 hover:underline" title="Làm mới đơn hàng">
                 <RefreshCw v-if="isRefreshing" class="h-4 w-4 animate-spin" />
                 <RefreshCw v-else class="h-4 w-4" />
                 <span v-if="!isRefreshing">Làm mới</span>
             </button>
-
             <button @click="lockScreen" class="flex items-center gap-1 text-sm text-red-600 hover:underline" title="Khóa màn hình">
                 <Lock class="h-4 w-4" /> Khóa
             </button>
-
             <button @click="toggleDarkMode" class="text-xl text-yellow-500 hover:text-yellow-600" title="Đổi chế độ sáng/tối">
                 <Sun v-if="!isDark" class="h-5 w-5" />
                 <Moon v-else class="h-5 w-5" />
             </button>
-
-            <!-- Dropdown -->
             <div class="relative" ref="dropdownRef">
                 <button
                     @click="toggleDropdown"
@@ -216,8 +203,6 @@ onUnmounted(() => {
             </div>
         </div>
     </header>
-
-    <!-- Lớp phủ khóa màn hình -->
     <div
         v-if="isLocked"
         @click="unlockScreen"

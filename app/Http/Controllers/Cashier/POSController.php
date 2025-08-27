@@ -242,6 +242,20 @@ class POSController
                 'notes' => 'nullable|string|max:255',
             ]);
 
+            // Kiểm tra xem có nhân viên khác đang có phiên làm việc mở hay không
+            $otherActiveSession = CashRegisterSession::where('user_id', '!=', $user->id)
+                ->whereNull('closed_at')
+                ->whereNull('deleted_at')
+                ->first();
+
+            if ($otherActiveSession) {
+                $otherUser = \App\Models\User::find($otherActiveSession->user_id);
+                return response()->json([
+                    'errors' => ['server' => "Nhân viên {$otherUser->name} đang có ca làm việc mở. Vui lòng yêu cầu họ đóng ca trước khi bạn mở ca mới."]
+                ], 422);
+            }
+
+            // Kiểm tra xem nhân viên hiện tại có ca làm việc đang mở trong ngày hôm nay không
             $existingShift = UserShift::where('user_id', $user->id)
                 ->where('date', Carbon::today('Asia/Ho_Chi_Minh')->toDateString())
                 ->whereIn('status', ['SCHEDULED', 'CHECKED_IN'])
@@ -252,6 +266,7 @@ class POSController
                 return response()->json(['errors' => ['server' => 'Bạn đã có một ca làm việc đang mở trong ngày hôm nay.']], 422);
             }
 
+            // Kiểm tra xem nhân viên hiện tại có phiên làm việc mở hay không
             $activeSession = CashRegisterSession::where('user_id', $user->id)
                 ->whereNull('closed_at')
                 ->whereNull('deleted_at')
@@ -261,6 +276,7 @@ class POSController
                 return response()->json(['errors' => ['server' => 'Bạn đã có một phiên làm việc đang mở.']], 422);
             }
 
+            // Tạo ca làm việc mới
             $userShift = UserShift::create([
                 'user_id' => $user->id,
                 'date' => Carbon::today('Asia/Ho_Chi_Minh')->toDateString(),
@@ -270,6 +286,7 @@ class POSController
                 'updated_at' => Carbon::now('Asia/Ho_Chi_Minh'),
             ]);
 
+            // Tạo phiên làm việc mới
             $session = CashRegisterSession::create([
                 'user_id' => $user->id,
                 'user_shift_id' => $userShift->id,
@@ -296,7 +313,7 @@ class POSController
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Exception $e) {
-            return response()->json(['errors' => ['server' => 'Có lỗi khi mở ca làm việc.']], 500);
+            return response()->json(['errors' => ['server' => 'Có lỗi khi mở ca làm việc: ' . $e->getMessage()]], 500);
         }
     }
 
