@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers\Cashier\Auth;
 
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use App\Models\Bill;
 use Inertia\Inertia;
+use App\Models\UserShift;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use App\Models\CashRegisterSession;
+use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Auth;
 
 class AuthenticatedSessionController extends Controller
 {
@@ -42,6 +46,49 @@ class AuthenticatedSessionController extends Controller
 
     public function destroy(Request $request)
     {
+        $closeShift = $request->input('closeShift', false);
+
+        if ($closeShift) {
+            // Đóng ca trong cash_register_sessions
+            $currentSession = CashRegisterSession::where('user_id', Auth::id())
+                ->whereNull('closed_at')
+                ->first();
+
+            if ($currentSession) {
+                // Tính closing_amount từ bills (tổng tiền giao dịch trong ca)
+                $closingAmount = Bill::where('session_id', $currentSession->id)
+                    ->sum('total_amount');
+
+                $currentSession->update([
+                    'closed_at' => Carbon::now(),
+                    'closing_amount' => $closingAmount,
+                    'actual_amount' => $closingAmount, // Giả sử actual_amount bằng closing_amount, có thể cần nhập từ frontend
+                    'difference' => 0,
+                    'notes' => 'Ca làm việc được đóng khi đăng xuất.',
+                ]);
+
+                // Cập nhật user_shifts
+                $currentShift = UserShift::where('user_id', Auth::id())
+                    ->where('date', Carbon::today())
+                    ->whereIn('status', ['SCHEDULED', 'CHECKED_IN'])
+                    ->first();
+
+                if ($currentShift) {
+                    $checkOutTime = Carbon::now();
+                    $totalHours = $currentShift->check_in
+                        ? $checkOutTime->diffInHours($currentShift->check_in)
+                        : null;
+
+                    $currentShift->update([
+                        'status' => 'COMPLETED',
+                        'check_out' => $checkOutTime,
+                        'total_hours' => $totalHours,
+                        'notes' => 'Ca làm việc hoàn thành khi đăng xuất.',
+                    ]);
+                }
+            }
+        }
+
         Auth::guard('web')->logout();
 
         $request->session()->invalidate();
